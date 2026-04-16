@@ -1,0 +1,22 @@
+{
+  "api_base": {
+    "description": "你的网关地址，例如 http://127.0.0.1:8000/v1",
+    "type": "string",
+    "default": "http://127.0.0.1:8000/v1"
+  },
+  "api_key": {
+    "description": "你的 API 密钥",
+    "type": "string",
+    "default": ""
+  },
+  "txt2img_model": {
+    "description": "没有参考图时使用的文生图模型，例如 image-01",
+    "type": "string",
+    "default": "image-01"
+  },
+  "img2img_model": {
+    "description": "有参考图时进行精修的图生图模型，例如 image-01",
+    "type": "string",
+    "default": "image-01"
+  }
+}

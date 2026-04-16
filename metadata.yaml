@@ -1,0 +1,6 @@
+name: astrbot_plugin_life_selfie
+display_name: 生活自拍插件
+desc: 根据生活日程生成自拍照的插件
+version: v1.0.0
+author: ansekafei
+repo: https://github.com/ansekafei/astrbot-plugin-life-selfie
