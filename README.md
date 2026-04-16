@@ -1,6 +1,6 @@
 # astrbot-plugin-life-scheduler
 
-AstrBot 生活日程插件 / A Life Scheduler Plugin for AstrBot
+AstrBot MiniMax生图插件 / A Life Scheduler Plugin for AstrBot
 
 > [!NOTE]
 > 此插件为 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 的功能扩展，提供生成自拍照指令。
