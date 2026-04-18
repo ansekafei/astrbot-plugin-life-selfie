@@ -6,12 +6,9 @@ AstrBot MiniMax生图插件 / A Life Scheduler Plugin for AstrBot
 > 此插件为 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 的功能扩展，提供生成自拍照指令。
 >
 > [AstrBot](https://github.com/AstrBotDevs/AstrBot) 是一个智能对话助手，支持 QQ、Telegram、飞书、钉钉、Slack、Discord 等多平台部署，可快速构建个人 AI 助手、企业客服、自动化工作流等应用。
-
-# 功能指令
-
-| 指令 | 说明 |
-|------|------|
-| `/自拍` | 根据今日穿搭和日程，生成一张 3:4 比例的自拍照 |
+# 注意
+此插件需要一栏网关插件，在本项目中没有提供，插件链接如下：https://github.com/ansekafei/llm-gateway/blob/main/app/modules/minimax_image_adapter.py
+您可以随时修改网关插件来适配
 
 # 配置项
 
