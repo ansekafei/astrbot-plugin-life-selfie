@@ -18,5 +18,11 @@
     "description": "有参考图时进行精修的图生图模型，例如 image-01",
     "type": "string",
     "default": "image-01"
+  },
+  "aspect_ratio": {
+    "description": "生成图片的宽高比",
+    "type": "string",
+    "default": "3:4",
+    "options": ["1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9"]
   }
 }

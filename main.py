@@ -1,6 +1,6 @@
 import base64
-import datetime
 import json
+import datetime
 import os
 from pathlib import Path
 
@@ -9,114 +9,101 @@ import aiohttp
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-# 修复：导入正确的路径工具类
 from astrbot.core.star.star_tools import StarTools
+from astrbot.api.provider import ProviderRequest
+from astrbot.api.all import llm_tool
 
-@register("life_selfie", "ansekafei", "根据生活日程生成自拍照的插件", "1.0.0")
+@register("life_selfie", "ansekafei", "根据生活日程生成自拍照的插件(FC版)", "2.0.0")
 class LifeSelfiePlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
-        
-        # 修复：使用 StarTools 获取当前插件的独立数据目录
         self.data_dir = StarTools.get_data_dir()
         
-        # 跨插件读取数据：向上一级找到 plugins 目录，再进入日程插件目录
-        self.schedule_data_path = self.data_dir.parent / "astrbot_plugin_life_scheduler" / "schedule_data.json"
+        # 预留的日程数据路径，暂时不在本次调试中使用
+        # self.schedule_data_path = self.data_dir.parent / "astrbot_plugin_life_scheduler" / "schedule_data.json"
 
-    @filter.command("自拍")
-    async def generate_selfie(self, event: AstrMessageEvent):
-        """生成一张带有今日穿搭和日程的自拍照"""
-        yield event.plain_result("正在整理衣服找角度，请稍等哦~")
+    # ==========================================
+    # 核心链路一：系统提示词拦截与动态注入
+    # ==========================================
+    @filter.on_llm_request()
+    async def inject_system_prompt(self, event: AstrMessageEvent, req: ProviderRequest):
+        """拦截发往大模型的请求，注入沐子的外貌基底和绘图逻辑"""
+        
+        character_anchor = (
+            "\n\n[系统高优先级指令 / System Override - 绘图模块]\n"
+            "【外貌基底与绘图公式】：当需要调用 generate_image 工具时，你的形象是固定的：18-20岁女孩，微乱的长发，戴着防蓝光黑框眼镜，穿着宽大的深色连帽卫衣裙（oversized dark hoodie dress），长袖子盖住手背（sleeves past wrists）。你坐在温馨的数字房间书桌前，面前是单显示器电脑。\n"
+            "【提示词构造强制规则】：传入 generate_image 的 image_prompt 参数必须是纯英文的、由逗号分隔的短语（Tags），绝对不能是中文或完整自然语言句子！\n"
+            "公式：[外貌基底] + [当前动作/神态] + [光影/环境] + [质量词]。\n"
+            "示例：1girl, solo, messy long hair, black framed glasses, oversized dark hoodie dress, sleeves past wrists, looking at viewer, sleepy expression, sitting at computer desk, cozy dark room, monitor screen glowing, masterpiece, best quality\n"
+            "【触发机制】：\n"
+            "由于你内向社恐，你不会频繁发照片。只有当咖啡主动要求看你、聊到你的穿着/外貌、或者你熬夜太久想撒娇时，你才会像个真实网恋女友一样，打开电脑摄像头或拿起手机给他发一张照片。发送照片时，文字回复必须极其简短，符合你的空格断句习惯。"
+        )
+        
+        if req.system_prompt:
+            req.system_prompt += character_anchor
+        else:
+            req.system_prompt = character_anchor
 
-        # 读取配置项
+    # ==========================================
+    # 核心链路二：注册 Function Calling 绘图工具
+    # ==========================================
+    @llm_tool(name="generate_image")
+    async def generate_image(self, event: AstrMessageEvent, image_prompt: str):
+        """
+        当你需要给咖啡发送自拍、展示你当前在书桌前的状态，或者他要求看你时调用此工具。
+        
+        Args:
+            image_prompt (string): 必须是纯英文逗号分隔的Tags。必须包含你的核心特征（messy long hair, black framed glasses, oversized dark hoodie dress, sleeves past wrists），并结合当前的聊天语境（如：sleepy, typing on keyboard, drinking water, late night 等）。
+        """
+        # 工具被调用时的过渡语，符合她的软糯人设
+        yield event.plain_result("等下哦 电脑摄像头有点卡...")
+        
+        # 打印大模型生成的 prompt，方便我们在控制台调试
+        logger.info(f"[自拍插件] 大模型传入的生图 Prompt: {image_prompt}")
+
         api_base = self.config.get("api_base", "").rstrip('/')
         api_key = self.config.get("api_key", "")
         txt2img_model = self.config.get("txt2img_model", "image-01")
-        img2img_model = self.config.get("img2img_model", "image-01")
 
         if not api_base or not api_key:
-            yield event.plain_result("📸 自拍功能未初始化，请先在网页管理后台配置 API 接口地址和 Key 哦~")
+            yield event.plain_result("⚠️ 绘图网关未配置，无法生成画面。")
             return
 
-        # 安全地从 JSON 文件读取今日数据
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        outfit = "日常休闲装"
-        schedule = "正在放松休息"
-        
-        try:
-            if self.schedule_data_path.exists():
-                with open(self.schedule_data_path, "r", encoding="utf-8") as f:
-                    schedule_data = json.load(f)
-                    if today_str in schedule_data:
-                        outfit = schedule_data[today_str].get("outfit", outfit)
-                        schedule = schedule_data[today_str].get("schedule", schedule)
-        except Exception as e:
-            logger.error(f"读取日程数据失败: {e}")
-
-        # 组装 Prompt
-        prompt = (
-            f"Selfie perspective, wearing {outfit}, doing {schedule}, "
-            f"casual selfie photo, natural lighting, upper body portrait, masterpiece, highly detailed"
-        )
-
-        ref_image_path = self.data_dir / "ref.png"
-        has_ref_image = ref_image_path.exists()
-
         headers = {
-            "Authorization": f"Bearer {api_key}"
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
         }
 
         try:
             async with aiohttp.ClientSession() as session:
-                if not has_ref_image:
-                    # ===== 场景 A：无参考图，走标准文生图 =====
-                    url = f"{api_base}/images/generations"
-                    headers["Content-Type"] = "application/json"
-                    payload = {
-                        "model": txt2img_model,
-                        "prompt": prompt,
-                        "n": 1,
-                        "size": "1024x1024"
-                    }
-                    async with session.post(url, json=payload, headers=headers) as resp:
-                        if resp.status >= 400:
-                            err_text = await resp.text()
-                            raise Exception(f"文生图报错 HTTP {resp.status}: {err_text}")
-                        result = await resp.json()
-                else:
-                    # ===== 场景 B：有参考图，走标准图生图/编辑 =====
-                    url = f"{api_base}/images/edits"
-                    form_data = aiohttp.FormData()
-                    form_data.add_field('image', open(ref_image_path, 'rb'), filename='ref.png', content_type='image/png')
-                    form_data.add_field('prompt', prompt)
-                    form_data.add_field('model', img2img_model)
-                    form_data.add_field('n', '1')
-                    form_data.add_field('size', '1024x1024')
-                    
-                    async with session.post(url, data=form_data, headers=headers) as resp:
-                        if resp.status >= 400:
-                            err_text = await resp.text()
-                            raise Exception(f"图生图报错 HTTP {resp.status}: {err_text}")
-                        result = await resp.json()
+                url = f"{api_base}/images/generations"
+                payload = {
+                    "model": txt2img_model,
+                    "prompt": image_prompt,
+                    "n": 1,
+                    "size": "1024x1792" # 锁死竖屏比例
+                }
+                
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status >= 400:
+                        err_text = await resp.text()
+                        raise Exception(f"网关报错 HTTP {resp.status}: {err_text}")
+                    result = await resp.json()
 
-                # 使用标准 OpenAI 返回格式解析
                 image_data = result.get("data", [])
                 if not image_data:
                     raise ValueError(f"API 返回数据异常: {result}")
                 
-                # 处理 Base64 格式的返回
+                # 优先处理 Base64
                 if "b64_json" in image_data[0]:
                     img_bytes = base64.b64decode(image_data[0]["b64_json"])
-                    # 将图片暂时保存在插件目录下
                     temp_img_path = self.data_dir / "temp_selfie.png"
                     with open(temp_img_path, "wb") as f:
                         f.write(img_bytes)
-                    
-                    # 发送本地图片
                     yield event.image_result(str(temp_img_path))
-                    
-                # 兼容传统的 URL 返回
+                
+                # 兜底处理 URL
                 elif "url" in image_data[0]:
                     yield event.image_result(image_data[0]["url"])
                     
@@ -125,5 +112,4 @@ class LifeSelfiePlugin(Star):
 
         except Exception as e:
             logger.error(f"自拍生成彻底失败: {e}")
-            # 把网关的真实报错直接发到聊天框里，方便一眼看穿！
-            yield event.plain_result(f"网关抗议啦！报错信息：\n{str(e)[:250]}")
+            yield event.plain_result(f"唔... 刚才网卡了一下 没发出去\n报错信息：{str(e)[:250]}")
